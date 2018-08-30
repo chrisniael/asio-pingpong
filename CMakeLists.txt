@@ -57,7 +57,6 @@ message(STATUS "PROJECT_BINARY_DIR       = ${PROJECT_BINARY_DIR}")
 message(STATUS "CMAKE_CURRENT_SOURCE_DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "CMAKE_CURRENT_BINARY_DIR = ${CMAKE_CURRENT_BINARY_DIR}")
 
-include_directories(${CMAKE_SOURCE_DIR}/common)
 include_directories(${CMAKE_SOURCE_DIR}/opt/client)
 include_directories(${CMAKE_SOURCE_DIR}/opt/server)
 include_directories(${CMAKE_SOURCE_DIR}/opt/asio/asio/include)

@@ -6,6 +6,7 @@
  * @date 2018-08-30
  */
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -60,14 +61,14 @@ class Msg {
 
 class Session : public std::enable_shared_from_this<Session> {
  public:
-  Session(asio::ip::tcp::socket&& socket)
-      : io_service_(socket.get_io_service()),
-        resolver_(io_service_),
-        socket_(std::move(socket)) {}
+  Session(asio::io_service& io_service)
+      : io_service_(io_service), resolver_(io_service), socket_(io_service) {}
 
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
   virtual ~Session() {}
+
+  asio::ip::tcp::socket& get_socket() { return this->socket_; }
 
   void Close() {
     auto self = this->shared_from_this();
@@ -95,7 +96,7 @@ class Session : public std::enable_shared_from_this<Session> {
                        if (!ec && this->OnReadHeader(&read_msg_)) {
                          DoReadBody();
                        } else {
-                         RecvError(ec);
+                         RecvError();
                        }
                      });
   }
@@ -109,7 +110,7 @@ class Session : public std::enable_shared_from_this<Session> {
                          this->OnReadBody(&read_msg_);
                          DoReadHeader();
                        } else {
-                         RecvError(ec);
+                         RecvError();
                        }
                      });
   }
@@ -125,22 +126,34 @@ class Session : public std::enable_shared_from_this<Session> {
               DoWrite();
             }
           } else {
-            SendError(ec);
+            SendError();
           }
         });
   }
 
-  virtual void ConnError(const std::error_code& ec) {}
-  virtual void RecvError(const std::error_code& ec) {}
-  virtual void SendError(const std::error_code& ec) {}
-  virtual void OnConnected() {}
-  virtual void OnClose() {}
+  virtual void RecvError() { std::cerr << "RecvError." << std::endl; }
+  virtual void SendError() { std::cerr << "SendError." << std::endl; }
+  virtual void OnClose() { std::cout << "OnClose." << std::endl; }
   virtual bool OnReadHeader(Msg* msg) {
     if (!msg) return false;
     return msg->DecodeHeader();
   }
   virtual void OnReadBody(Msg* msg) {
     if (!msg) return;
+
+    static long long msg_count = 0;
+    static std::chrono::milliseconds time_from =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch());
+    std::chrono::milliseconds time_now =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch());
+    uint64_t time_passed = (time_now - time_from).count();
+    uint64_t pack_per_sec =
+        static_cast<double>(++msg_count) / time_passed * 1000;
+    std::cout << "Recv msg, count=" << msg_count
+              << ", pack/sec=" << pack_per_sec << std::endl;
+    this->Write(*msg);
   }
 
  private:
@@ -160,19 +173,22 @@ class Server {
     addr.from_string(ip);
     asio::ip::tcp::endpoint endpoint(addr, port);
     this->acceptor_.open(asio::ip::tcp::v4());
-    this->acceptor_.bind(endpoint);
-
     asio::socket_base::reuse_address option(true);
     this->acceptor_.set_option(option);
+    this->acceptor_.bind(endpoint);
+    this->acceptor_.listen();
   }
 
   void DoAccept() {
-    asio::ip::tcp::socket socket(acceptor_.get_io_service());
-    acceptor_.async_accept(socket, [&socket, this](std::error_code ec) {
+    auto session = std::make_shared<Session>(this->acceptor_.get_io_service());
+    acceptor_.async_accept(session->get_socket(), [=](std::error_code ec) {
+      std::cout << "DoAccept." << std::endl;
       if (!ec) {
-        std::make_shared<Session>(std::move(socket))->DoReadHeader();
+        session->DoReadHeader();
+        DoAccept();
+      } else {
+        std::cerr << "Accept error." << std::endl;
       }
-      DoAccept();
     });
   }
 
