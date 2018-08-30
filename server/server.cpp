@@ -18,7 +18,7 @@
 class Msg {
  public:
   enum { kHeaderLength = 2 };
-  enum { kMaxBodyLength = 5120 };
+  enum { kMaxBodyLength = 16000 };
 
   Msg() : body_length_(0) {}
 
@@ -62,7 +62,7 @@ class Msg {
 class Session : public std::enable_shared_from_this<Session> {
  public:
   Session(asio::io_service& io_service)
-      : io_service_(io_service), resolver_(io_service), socket_(io_service) {}
+      : io_service_(io_service), socket_(io_service) {}
 
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
@@ -142,23 +142,12 @@ class Session : public std::enable_shared_from_this<Session> {
     if (!msg) return;
 
     static long long msg_count = 0;
-    static std::chrono::milliseconds time_from =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch());
-    std::chrono::milliseconds time_now =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch());
-    uint64_t time_passed = (time_now - time_from).count();
-    uint64_t pack_per_sec =
-        static_cast<double>(++msg_count) / time_passed * 1000;
-    std::cout << "Recv msg, count=" << msg_count
-              << ", pack/sec=" << pack_per_sec << std::endl;
+    std::cout << "Recv msg, count=" << msg_count << std::endl;
     this->Write(*msg);
   }
 
  private:
   asio::io_service& io_service_;
-  asio::ip::tcp::resolver resolver_;
   asio::ip::tcp::socket socket_;
   Msg read_msg_;
   std::deque<Msg> write_msgs_;
@@ -198,7 +187,7 @@ class Server {
 
 int main() {
   std::cout << "Server." << std::endl;
-  std::string ip = "127.0.0.1";
+  std::string ip = "0.0.0.0";
   unsigned short port = 6789;
 
   try {

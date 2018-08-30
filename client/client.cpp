@@ -18,7 +18,7 @@
 class Msg {
  public:
   enum { kHeaderLength = 2 };
-  enum { kMaxBodyLength = 5120 };
+  enum { kMaxBodyLength = 16000 };
 
   Msg() : body_length_(0) {}
 
@@ -187,8 +187,8 @@ class Client {
   virtual void OnConnected() {
     std::cout << "Connected." << std::endl;
     Msg msg;
-    msg.set_body_length(8);
-    memset(msg.body(), 1, 8);
+    msg.set_body_length(16000);
+    memset(msg.body(), 1, 16000);
     session_.Write(msg);
   }
   virtual void ConnError() {}
