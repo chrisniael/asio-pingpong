@@ -15,48 +15,9 @@
 
 #include "asio.hpp"
 
-class Msg {
- public:
-  enum { kHeaderLength = 2 };
-  enum { kMaxBodyLength = 16000 };
-
-  Msg() : body_length_(0) {}
-
-  const char* data() const { return data_; }
-
-  char* data() { return data_; }
-
-  std::size_t length() const { return kHeaderLength + body_length_; }
-
-  const char* body() const { return data_ + kHeaderLength; }
-
-  char* body() { return data_ + kHeaderLength; }
-
-  std::size_t body_length() const { return body_length_; }
-
-  void set_body_length(std::size_t new_length) {
-    body_length_ = new_length;
-    if (body_length_ > kMaxBodyLength) body_length_ = kMaxBodyLength;
-
-    uint16_t* body_length_pt = reinterpret_cast<uint16_t*>(this->data_);
-    *body_length_pt = new_length;
-  }
-
-  virtual bool DecodeHeader() {
-    uint16_t len = 0;
-    memcpy(&len, data_, kHeaderLength);
-    body_length_ = len;
-
-    if (body_length_ > kMaxBodyLength) {
-      body_length_ = 0;
-      return false;
-    }
-    return true;
-  }
-
- private:
-  char data_[kHeaderLength + kMaxBodyLength];
-  uint16_t body_length_;
+struct Buffer {
+  enum { kMaxBufferSize = 16 * 1024 };
+  char buffer[kMaxBufferSize];
 };
 
 class Session : public std::enable_shared_from_this<Session> {
@@ -76,48 +37,37 @@ class Session : public std::enable_shared_from_this<Session> {
       this->OnClose();
     });
   }
-  void Write(const Msg& msg) {
+  void Write(const Buffer& msg) {
     io_service_.post([=]() {
-      bool write_in_progress = !write_msgs_.empty();
-      write_msgs_.push_back(msg);
+      bool write_in_progress = !write_bufs_.empty();
+      write_bufs_.push_back(msg);
       if (!write_in_progress) {
         DoWrite();
       }
     });
   }
 
-  void DoReadHeader() {
-    asio::async_read(socket_,
-                     asio::buffer(read_msg_.data(), Msg::kHeaderLength),
-                     [=](std::error_code ec, std::size_t /*length*/) {
-                       if (!ec && this->OnReadHeader(&read_msg_)) {
-                         DoReadBody();
-                       } else {
-                         RecvError();
-                       }
-                     });
+  void DoRead() {
+    asio::async_read(
+        socket_, asio::buffer(this->read_buf_.buffer, Buffer::kMaxBufferSize),
+        [=](std::error_code ec, std::size_t /*length*/) {
+          if (!ec) {
+            this->OnRead(this->read_buf_);
+            DoRead();
+          } else {
+            RecvError();
+          }
+        });
   }
 
-  void DoReadBody() {
-    asio::async_read(socket_,
-                     asio::buffer(read_msg_.body(), read_msg_.body_length()),
-                     [=](std::error_code ec, std::size_t /*length*/) {
-                       if (!ec) {
-                         this->OnReadBody(&read_msg_);
-                         DoReadHeader();
-                       } else {
-                         RecvError();
-                       }
-                     });
-  }
   void DoWrite() {
     asio::async_write(
         socket_,
-        asio::buffer(write_msgs_.front().data(), write_msgs_.front().length()),
+        asio::buffer(write_bufs_.front().buffer, Buffer::kMaxBufferSize),
         [=](std::error_code ec, std::size_t /*length*/) {
           if (!ec) {
-            write_msgs_.pop_front();
-            if (!write_msgs_.empty()) {
+            write_bufs_.pop_front();
+            if (!write_bufs_.empty()) {
               DoWrite();
             }
           } else {
@@ -129,13 +79,7 @@ class Session : public std::enable_shared_from_this<Session> {
   virtual void RecvError() {}
   virtual void SendError() {}
   virtual void OnClose() {}
-  virtual bool OnReadHeader(Msg* msg) {
-    if (!msg) return false;
-    return msg->DecodeHeader();
-  }
-  virtual void OnReadBody(Msg* msg) {
-    if (!msg) return;
-
+  virtual void OnRead(const Buffer& buf) {
     static long long msg_count = 0;
     static std::chrono::milliseconds time_from =
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -149,15 +93,15 @@ class Session : public std::enable_shared_from_this<Session> {
     std::cout << "Recv msg, count=" << msg_count
               << ", pack/sec=" << pack_per_sec << std::endl;
 
-    this->Write(*msg);
+    this->Write(buf);
   }
 
  private:
   asio::io_service& io_service_;
   asio::ip::tcp::resolver resolver_;
   asio::ip::tcp::socket socket_;
-  Msg read_msg_;
-  std::deque<Msg> write_msgs_;
+  Buffer read_buf_;
+  std::deque<Buffer> write_bufs_;
 };
 
 class Client {
@@ -177,7 +121,7 @@ class Client {
         [=](std::error_code ec, asio::ip::tcp::resolver::iterator) {
           if (!ec) {
             this->OnConnected();
-            this->session_.DoReadHeader();
+            this->session_.DoRead();
           } else {
             ConnError();
           }
@@ -186,10 +130,9 @@ class Client {
 
   virtual void OnConnected() {
     std::cout << "Connected." << std::endl;
-    Msg msg;
-    msg.set_body_length(16000);
-    memset(msg.body(), 1, 16000);
-    session_.Write(msg);
+    Buffer buf;
+    memset(buf.buffer, 1, Buffer::kMaxBufferSize);
+    session_.Write(buf);
   }
   virtual void ConnError() {}
 
@@ -198,10 +141,15 @@ class Client {
   Session session_;
 };
 
-int main() {
-  std::cout << "Client." << std::endl;
-  std::string ip = "127.0.0.1";
-  unsigned short port = 6789;
+int main(int argc, char* argv[]) {
+  if (argc != 3) {
+    std::cerr << "Usage: client <host> <port>\n";
+    return 1;
+  }
+  std::cout << "Client start." << std::endl;
+
+  std::string ip = argv[1];
+  unsigned short port = std::stoi(argv[2]);
 
   try {
     asio::io_service io_service;
