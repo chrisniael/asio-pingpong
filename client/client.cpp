@@ -18,10 +18,12 @@
 #include <vector>
 
 #include "asio.hpp"
+#include "asio/steady_timer.hpp"
 
-static std::chrono::milliseconds time_from =
+std::chrono::milliseconds time_from =
     std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch());
+std::atomic_ullong pack_num{0};
 
 class IoServicePool {
  public:
@@ -134,23 +136,8 @@ class Session : public std::enable_shared_from_this<Session> {
   virtual void SendError() {}
   virtual void OnClose() {}
   virtual void OnRead(const Buffer& buf) {
-    static long long msg_count = 0;
-    ++msg_count;
-
-    if (msg_count > 10 * 10000) {
-      std::chrono::milliseconds time_now =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::system_clock::now().time_since_epoch());
-      uint64_t time_passed = (time_now - time_from).count();
-      uint64_t pack_per_sec =
-          static_cast<double>(msg_count) / time_passed * 1000;
-      std::cout << "Recv msg, count=" << msg_count
-                << ", time_passed=" << time_passed
-                << ", pack/sec=" << pack_per_sec << std::endl;
-      this->Close();
-    } else {
-      this->Write(buf);
-    }
+    ++pack_num;
+    this->Write(buf);
   }
 
  private:
@@ -209,13 +196,31 @@ int main(int argc, char* argv[]) {
   unsigned short port = std::stoi(argv[2]);
 
   try {
+    asio::io_service io_service;
     std::list<Client> clients;
-    for (int i = 0; i < 1; ++i) {
+    for (int i = 0; i < 100; ++i) {
       clients.emplace_back(IoServicePool::Instance().GetIoService());
       clients.back().Connect(ip, port);
     }
+    asio::steady_timer timer(io_service);
+    std::chrono::seconds time_long{10};
+    timer.expires_from_now(time_long);
+    timer.async_wait(
+        [=](const asio::error_code&) { IoServicePool::Instance().Stop(); });
+
+    io_service.run();
     IoServicePool::Instance().Join();
   } catch (std::exception& e) {
     std::cerr << "Exception: " << e.what() << std::endl;
   }
+
+  std::chrono::milliseconds time_now =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch());
+  uint64_t time_passed = (time_now - time_from).count();
+  uint64_t pack_per_sec = static_cast<double>(pack_num) / time_passed * 1000;
+  std::cout << "Recv msg, pack_num=" << pack_num
+            << ", time_passed=" << time_passed << ", pack/sec=" << pack_per_sec
+            << std::endl;
+  IoServicePool::Instance().Stop();
 }
