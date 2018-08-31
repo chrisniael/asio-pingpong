@@ -9,3 +9,4 @@ install_manifest.txt
 bin
 lib
 compile_commands.json
+tags
