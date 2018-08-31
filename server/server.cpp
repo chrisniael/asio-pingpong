@@ -83,6 +83,7 @@ class Session : public std::enable_shared_from_this<Session> {
   void Close() {
     auto self = this->shared_from_this();
     this->io_service_.post([this, self]() {
+      this->socket_.shutdown(asio::ip::tcp::socket::shutdown_send);
       this->socket_.close();
       this->OnClose();
     });
@@ -107,7 +108,7 @@ class Session : public std::enable_shared_from_this<Session> {
                          this->OnRead(read_buf_);
                          DoRead();
                        } else {
-                         RecvError();
+                         RecvError(ec);
                        }
                      });
   }
@@ -129,12 +130,15 @@ class Session : public std::enable_shared_from_this<Session> {
         });
   }
 
-  virtual void RecvError() { std::cerr << "RecvError." << std::endl; }
+  virtual void RecvError(std::error_code ec) {
+    if (ec != asio::error::eof && ec != asio::error::connection_reset) {
+      std::cerr << "RecvError, value=" << ec.value()
+                << ", what=" << ec.message() << std::endl;
+    }
+  }
   virtual void SendError() { std::cerr << "SendError." << std::endl; }
   virtual void OnClose() { std::cout << "OnClose." << std::endl; }
-  virtual void OnRead(const Buffer& buf) {
-    this->Write(buf);
-  }
+  virtual void OnRead(const Buffer& buf) { this->Write(buf); }
 
  private:
   asio::io_service& io_service_;

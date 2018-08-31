@@ -58,6 +58,11 @@ class IoServicePool {
       t.join();
     }
   }
+  void ClearWork() {
+    for (auto& work : this->works_) {
+      work.reset();
+    }
+  }
   void Stop() {
     for (auto& io_service : this->io_service_) {
       io_service.stop();
@@ -89,6 +94,7 @@ class Session : public std::enable_shared_from_this<Session> {
 
   void Close() {
     this->io_service_.post([=]() {
+      this->socket_.shutdown(asio::ip::tcp::socket::shutdown_send);
       this->socket_.close();
       this->OnClose();
     });
@@ -111,7 +117,7 @@ class Session : public std::enable_shared_from_this<Session> {
             this->OnRead(this->read_buf_);
             DoRead();
           } else {
-            RecvError();
+            RecvError(ec);
           }
         });
   }
@@ -132,7 +138,12 @@ class Session : public std::enable_shared_from_this<Session> {
         });
   }
 
-  virtual void RecvError() {}
+  virtual void RecvError(std::error_code ec) {
+    if (ec != asio::error::eof && ec != asio::error::connection_reset) {
+      std::cerr << "RecvError, value=" << ec.value()
+                << ", what=" << ec.message() << std::endl;
+    }
+  }
   virtual void SendError() {}
   virtual void OnClose() {}
   virtual void OnRead(const Buffer& buf) {
@@ -173,12 +184,14 @@ class Client {
   }
 
   virtual void OnConnected() {
-    std::cout << "Connected." << std::endl;
     Buffer buf;
     memset(buf.buffer, 1, Buffer::kMaxBufferSize);
     session_.Write(buf);
   }
-  virtual void ConnError() {}
+
+  virtual void ConnError() { std::cerr << "ConnError." << std::endl; }
+
+  void Close() { this->session_.Close(); }
 
  private:
   asio::ip::tcp::resolver resolver_;
@@ -186,27 +199,36 @@ class Client {
 };
 
 int main(int argc, char* argv[]) {
-  if (argc != 3) {
-    std::cerr << "Usage: client <host> <port>\n";
+  if (argc != 5) {
+    std::cerr << "Usage: client <host> <port> <num> <time>\n";
     return 1;
   }
   std::cout << "Client start." << std::endl;
 
   std::string ip = argv[1];
   unsigned short port = std::stoi(argv[2]);
+  unsigned int client_num = std::stoi(argv[3]);
+  unsigned int time_seconds = std::stoi(argv[4]);
 
   try {
     asio::io_service io_service;
     std::list<Client> clients;
-    for (int i = 0; i < 100; ++i) {
+    for (unsigned int i = 0; i < client_num; ++i) {
       clients.emplace_back(IoServicePool::Instance().GetIoService());
       clients.back().Connect(ip, port);
     }
     asio::steady_timer timer(io_service);
-    std::chrono::seconds time_long{10};
+    std::chrono::seconds time_long{std::stoi(argv[4])};
     timer.expires_from_now(time_long);
-    timer.async_wait(
-        [=](const asio::error_code&) { IoServicePool::Instance().Stop(); });
+    timer.async_wait([&clients](const asio::error_code&) {
+      /*
+      for (auto& client : clients) {
+        client.Close();
+      }
+      IoServicePool::Instance().ClearWork();
+      */
+      IoServicePool::Instance().Stop();
+    });
 
     io_service.run();
     IoServicePool::Instance().Join();
