@@ -19,6 +19,10 @@
 
 #include "asio.hpp"
 
+static std::chrono::milliseconds time_from =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+
 class IoServicePool {
  public:
   using IoService = asio::io_service;
@@ -66,7 +70,7 @@ class IoServicePool {
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 16 * 1024 };
+  enum { kMaxBufferSize = 16 };
   char buffer[kMaxBufferSize];
 };
 
@@ -131,19 +135,22 @@ class Session : public std::enable_shared_from_this<Session> {
   virtual void OnClose() {}
   virtual void OnRead(const Buffer& buf) {
     static long long msg_count = 0;
-    static std::chrono::milliseconds time_from =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch());
-    std::chrono::milliseconds time_now =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch());
-    uint64_t time_passed = (time_now - time_from).count();
-    uint64_t pack_per_sec =
-        static_cast<double>(++msg_count) / time_passed * 1000;
-    std::cout << "Recv msg, count=" << msg_count
-              << ", pack/sec=" << pack_per_sec << std::endl;
+    ++msg_count;
 
-    this->Write(buf);
+    if (msg_count > 10 * 10000) {
+      std::chrono::milliseconds time_now =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch());
+      uint64_t time_passed = (time_now - time_from).count();
+      uint64_t pack_per_sec =
+          static_cast<double>(msg_count) / time_passed * 1000;
+      std::cout << "Recv msg, count=" << msg_count
+                << ", time_passed=" << time_passed
+                << ", pack/sec=" << pack_per_sec << std::endl;
+      this->Close();
+    } else {
+      this->Write(buf);
+    }
   }
 
  private:
@@ -203,7 +210,7 @@ int main(int argc, char* argv[]) {
 
   try {
     std::list<Client> clients;
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 1; ++i) {
       clients.emplace_back(IoServicePool::Instance().GetIoService());
       clients.back().Connect(ip, port);
     }

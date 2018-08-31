@@ -65,7 +65,7 @@ class IoServicePool {
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 16 * 1024 };
+  enum { kMaxBufferSize = 16 };
   char buffer[kMaxBufferSize];
 };
 
@@ -134,7 +134,7 @@ class Session : public std::enable_shared_from_this<Session> {
   virtual void OnClose() { std::cout << "OnClose." << std::endl; }
   virtual void OnRead(const Buffer& buf) {
     static long long msg_count = 0;
-    std::cout << "Recv msg, count=" << ++msg_count << std::endl;
+    // std::cout << "Recv msg, count=" << ++msg_count << std::endl;
     this->Write(buf);
   }
 
@@ -164,7 +164,6 @@ class Server {
     auto session =
         std::make_shared<Session>(IoServicePool::Instance().GetIoService());
     acceptor_.async_accept(session->get_socket(), [=](std::error_code ec) {
-      std::cout << "DoAccept." << std::endl;
       if (!ec) {
         session->DoRead();
         DoAccept();
