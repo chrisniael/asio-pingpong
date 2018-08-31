@@ -85,7 +85,7 @@ class Session : public std::enable_shared_from_this<Session> {
   virtual void OnClose() { std::cout << "OnClose." << std::endl; }
   virtual void OnRead(const Buffer& buf) {
     static long long msg_count = 0;
-    std::cout << "Recv msg, count=" << msg_count << std::endl;
+    std::cout << "Recv msg, count=" << ++msg_count << std::endl;
     this->Write(buf);
   }
 
