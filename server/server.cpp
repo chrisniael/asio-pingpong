@@ -6,14 +6,63 @@
  * @date 2018-08-30
  */
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <deque>
 #include <iostream>
 #include <memory>
+#include <thread>
+#include <vector>
 
 #include "asio.hpp"
+
+class IoServicePool {
+ public:
+  using IoService = asio::io_service;
+  using Work = asio::io_service::work;
+  using WorkPtr = std::unique_ptr<Work>;
+
+  IoServicePool(std::size_t pool_size = std::thread::hardware_concurrency())
+      : io_service_(pool_size), works_(pool_size), next_io_service_(0) {
+    for (std::size_t i = 0; i < io_service_.size(); ++i) {
+      works_[i] = std::unique_ptr<Work>(new Work(io_service_[i]));
+    }
+
+    for (std::size_t i = 0; i < io_service_.size(); ++i) {
+      threads_.emplace_back([this, i]() { io_service_[i].run(); });
+    }
+  }
+  IoServicePool(const IoServicePool&) = delete;
+  ~IoServicePool() {}
+  IoServicePool& operator=(const IoServicePool&) = delete;
+
+  static IoServicePool& Instance() {
+    static IoServicePool instance;
+    return instance;
+  }
+  asio::io_service& GetIoService() {
+    auto& service = io_service_[next_io_service_++ % io_service_.size()];
+    return service;
+  }
+  void Join() {
+    for (auto& t : threads_) {
+      t.join();
+    }
+  }
+  void Stop() {
+    for (auto& io_service : this->io_service_) {
+      io_service.stop();
+    }
+  }
+
+ private:
+  std::vector<IoService> io_service_;
+  std::vector<WorkPtr> works_;
+  std::vector<std::thread> threads_;
+  std::atomic_size_t next_io_service_;
+};
 
 struct Buffer {
   enum { kMaxBufferSize = 16 * 1024 };
@@ -112,7 +161,8 @@ class Server {
   }
 
   void DoAccept() {
-    auto session = std::make_shared<Session>(this->acceptor_.get_io_service());
+    auto session =
+        std::make_shared<Session>(IoServicePool::Instance().GetIoService());
     acceptor_.async_accept(session->get_socket(), [=](std::error_code ec) {
       std::cout << "DoAccept." << std::endl;
       if (!ec) {
@@ -142,6 +192,7 @@ int main(int argc, char* argv[]) {
     Server server(io_service, ip, port);
     server.DoAccept();
     io_service.run();
+    IoServicePool::Instance().Join();
   } catch (std::exception& e) {
     std::cerr << "Exception: " << e.what() << std::endl;
   }
