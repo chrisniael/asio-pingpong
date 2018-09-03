@@ -6,6 +6,7 @@
  * @date 2018-08-30
  */
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -80,8 +81,8 @@ class IoServicePool {
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 64 };
-  char buffer[kMaxBufferSize];
+  enum { kMaxBufferSize = 16 };
+  std::vector<char> buffer{kMaxBufferSize};
 };
 
 class Session : public std::enable_shared_from_this<Session> {
@@ -103,44 +104,18 @@ class Session : public std::enable_shared_from_this<Session> {
       this->OnClose();
     });
   }
-  void Write(const Buffer& buf) {
-    auto self = this->shared_from_this();
-    io_service_.post([this, self, buf]() {
-      bool write_in_progress = !write_bufs_.empty();
-      write_bufs_.push_back(buf);
-      if (!write_in_progress) {
-        DoWrite();
-      }
-    });
-  }
 
   void DoRead() {
     auto self = this->shared_from_this();
-    asio::async_read(socket_,
-                     asio::buffer(read_buf_.buffer, Buffer::kMaxBufferSize),
-                     [this, self](std::error_code ec, std::size_t /*length*/) {
-                       if (!ec) {
-                         this->OnRead(read_buf_);
-                         DoRead();
-                       } else {
-                         RecvError(ec);
-                       }
-                     });
-  }
-
-  void DoWrite() {
-    auto self = this->shared_from_this();
-    asio::async_write(
-        socket_,
-        asio::buffer(write_bufs_.front().buffer, Buffer::kMaxBufferSize),
-        [this, self](std::error_code ec, std::size_t /*length*/) {
+    socket_.async_read_some(
+        asio::buffer(read_buf_.buffer, Buffer::kMaxBufferSize),
+        [this, self](const asio::error_code& ec,
+                     std::size_t bytes_transferred) {
           if (!ec) {
-            write_bufs_.pop_front();
-            if (!write_bufs_.empty()) {
-              DoWrite();
-            }
+            this->OnRead(read_buf_, bytes_transferred);
+            //DoRead();
           } else {
-            SendError(ec);
+            RecvError(ec);
           }
         });
   }
@@ -156,13 +131,24 @@ class Session : public std::enable_shared_from_this<Session> {
               << std::endl;
   }
   virtual void OnClose() { std::cout << "OnClose." << std::endl; }
-  virtual void OnRead(const Buffer& buf) { this->Write(buf); }
+  virtual void OnRead(Buffer& buf, std::size_t bytes) {
+    this->write_bufs_.buffer.swap(buf.buffer);
+    auto self = this->shared_from_this();
+    asio::async_write(socket_, asio::buffer(write_bufs_.buffer, bytes),
+                      [this, self](std::error_code ec, std::size_t /*length*/) {
+                        if (!ec) {
+                          DoRead();
+                        } else {
+                          SendError(ec);
+                        }
+                      });
+  }
 
  private:
   asio::io_service& io_service_;
   asio::ip::tcp::socket socket_;
   Buffer read_buf_;
-  std::deque<Buffer> write_bufs_;
+  Buffer write_bufs_;
 };
 
 class Server {
