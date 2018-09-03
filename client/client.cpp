@@ -35,18 +35,12 @@ class IoServicePool {
   IoServicePool& operator=(const IoServicePool&) = delete;
 
   void Init(std::size_t pool_size = std::thread::hardware_concurrency()) {
-    next_io_service_ = 0;
+    for (size_t i = 0; i < pool_size; ++i) {
+      works_.emplace_back(new Work(this->io_service_));
+    }
 
     for (size_t i = 0; i < pool_size; ++i) {
-      io_services_.emplace_back(new asio::io_service);
-    }
-
-    for (size_t i = 0; i < io_services_.size(); ++i) {
-      works_.emplace_back(new Work(*(io_services_[i])));
-    }
-
-    for (size_t i = 0; i < io_services_.size(); ++i) {
-      threads_.emplace_back([this, i]() { io_services_[i]->run(); });
+      threads_.emplace_back([this, i]() { io_service_.run(); });
     }
   }
 
@@ -55,10 +49,7 @@ class IoServicePool {
     return instance;
   }
 
-  asio::io_service& GetIoService() {
-    auto& service = io_services_[next_io_service_++ % io_services_.size()];
-    return *service.get();
-  }
+  asio::io_service& GetIoService() { return this->io_service_; }
 
   void Join() {
     for (auto& t : threads_) {
@@ -72,17 +63,12 @@ class IoServicePool {
     }
   }
 
-  void Stop() {
-    for (auto& io_service : this->io_services_) {
-      io_service->stop();
-    }
-  }
+  void Stop() { io_service_.stop(); }
 
  private:
-  std::vector<std::unique_ptr<asio::io_service>> io_services_;
+  asio::io_service io_service_;
   std::vector<WorkPtr> works_;
   std::vector<std::thread> threads_;
-  std::atomic_size_t next_io_service_;
 };
 
 struct Buffer {
@@ -93,7 +79,10 @@ struct Buffer {
 class Session {
  public:
   Session(asio::io_service& io_service)
-      : io_service_(io_service), resolver_(io_service), socket_(io_service) {}
+      : io_service_(io_service),
+        strand_(io_service),
+        resolver_(io_service),
+        socket_(io_service) {}
 
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
@@ -109,28 +98,27 @@ class Session {
   }
   void Write(const Buffer& buf) {
     asio::async_write(
-        socket_,
-        asio::buffer(write_bufs_.buffer, Buffer::kMaxBufferSize),
-        [=](std::error_code ec, std::size_t /*length*/) {
+        socket_, asio::buffer(write_bufs_.buffer, Buffer::kMaxBufferSize),
+        this->strand_.wrap([=](std::error_code ec, std::size_t /*length*/) {
           if (!ec) {
             DoRead();
           } else {
             SendError(ec);
           }
-        });
-
+        }));
   }
 
   void DoRead() {
     this->socket_.async_read_some(
         asio::buffer(this->read_buf_.buffer, Buffer::kMaxBufferSize),
-        [=](const asio::error_code& ec, std::size_t bytes_transferred) {
-          if (!ec) {
-            this->OnRead(this->read_buf_, bytes_transferred);
-          } else {
-            RecvError(ec);
-          }
-        });
+        this->strand_.wrap(
+            [=](const asio::error_code& ec, std::size_t bytes_transferred) {
+              if (!ec) {
+                this->OnRead(this->read_buf_, bytes_transferred);
+              } else {
+                RecvError(ec);
+              }
+            }));
   }
 
   virtual void RecvError(std::error_code ec) {
@@ -148,18 +136,20 @@ class Session {
   virtual void OnRead(Buffer& buf, std::size_t bytes) {
     ++pack_num;
     this->write_bufs_.buffer.swap(buf.buffer);
-    asio::async_write(socket_, asio::buffer(write_bufs_.buffer, bytes),
-                      [=](std::error_code ec, std::size_t /*length*/) {
-                        if (!ec) {
-                          DoRead();
-                        } else {
-                          SendError(ec);
-                        }
-                      });
+    asio::async_write(
+        socket_, asio::buffer(write_bufs_.buffer, bytes),
+        this->strand_.wrap([=](std::error_code ec, std::size_t /*length*/) {
+          if (!ec) {
+            DoRead();
+          } else {
+            SendError(ec);
+          }
+        }));
   }
 
  private:
   asio::io_service& io_service_;
+  asio::io_service::strand strand_;
   asio::ip::tcp::resolver resolver_;
   asio::ip::tcp::socket socket_;
   Buffer read_buf_;
