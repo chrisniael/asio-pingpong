@@ -80,7 +80,7 @@ class IoServicePool {
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 4 };
+  enum { kMaxBufferSize = 64 };
   char buffer[kMaxBufferSize];
 };
 
@@ -152,8 +152,8 @@ class Session : public std::enable_shared_from_this<Session> {
     }
   }
   virtual void SendError(std::error_code ec) {
-      std::cerr << "SendError, value=" << ec.value()
-                << ", what=" << ec.message() << std::endl;
+    std::cerr << "SendError, value=" << ec.value() << ", what=" << ec.message()
+              << std::endl;
   }
   virtual void OnClose() { std::cout << "OnClose." << std::endl; }
   virtual void OnRead(const Buffer& buf) { this->Write(buf); }
@@ -188,7 +188,8 @@ class Server {
         session->DoRead();
         DoAccept();
       } else {
-        std::cerr << "Accept error." << std::endl;
+        std::cerr << "AcceptError, value=" << ec.value()
+                  << ", what=" << ec.message() << std::endl;
       }
     });
   }
