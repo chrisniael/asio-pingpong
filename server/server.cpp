@@ -103,11 +103,11 @@ class Session : public std::enable_shared_from_this<Session> {
       this->OnClose();
     });
   }
-  void Write(const Buffer& msg) {
+  void Write(const Buffer& buf) {
     auto self = this->shared_from_this();
-    io_service_.post([this, self, msg]() {
+    io_service_.post([this, self, buf]() {
       bool write_in_progress = !write_bufs_.empty();
-      write_bufs_.push_back(msg);
+      write_bufs_.push_back(buf);
       if (!write_in_progress) {
         DoWrite();
       }

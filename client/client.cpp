@@ -107,9 +107,9 @@ class Session {
     this->socket_.close();
     this->OnClose();
   }
-  void Write(const Buffer& msg) {
+  void Write(const Buffer& buf) {
     bool write_in_progress = !write_bufs_.empty();
-    write_bufs_.push_back(msg);
+    write_bufs_.push_back(buf);
     if (!write_in_progress) {
       DoWrite();
     }
