@@ -27,57 +27,67 @@ std::atomic_ullong pack_num{0};
 
 class IoServicePool {
  public:
-  using IoService = asio::io_service;
   using Work = asio::io_service::work;
   using WorkPtr = std::unique_ptr<Work>;
 
-  IoServicePool(std::size_t pool_size = std::thread::hardware_concurrency())
-      : io_service_(pool_size), works_(pool_size), next_io_service_(0) {
-    for (std::size_t i = 0; i < io_service_.size(); ++i) {
-      works_[i] = std::unique_ptr<Work>(new Work(io_service_[i]));
-    }
-
-    for (std::size_t i = 0; i < io_service_.size(); ++i) {
-      threads_.emplace_back([this, i]() { io_service_[i].run(); });
-    }
-  }
+  IoServicePool() = default;
   IoServicePool(const IoServicePool&) = delete;
   ~IoServicePool() {}
   IoServicePool& operator=(const IoServicePool&) = delete;
+
+  void Init(std::size_t pool_size = std::thread::hardware_concurrency()) {
+    next_io_service_ = 0;
+
+    for (size_t i = 0; i < pool_size; ++i) {
+      io_services_.emplace_back(new asio::io_service);
+    }
+
+    for (size_t i = 0; i < io_services_.size(); ++i) {
+      works_.emplace_back(new Work(*(io_services_[i])));
+    }
+
+    for (size_t i = 0; i < io_services_.size(); ++i) {
+      threads_.emplace_back([this, i]() { io_services_[i]->run(); });
+    }
+  }
 
   static IoServicePool& Instance() {
     static IoServicePool instance;
     return instance;
   }
+
   asio::io_service& GetIoService() {
-    auto& service = io_service_[next_io_service_++ % io_service_.size()];
-    return service;
+    auto& service = io_services_[next_io_service_++ % io_services_.size()];
+    return *service.get();
   }
+
   void Join() {
     for (auto& t : threads_) {
       t.join();
     }
   }
+
   void ClearWork() {
     for (auto& work : this->works_) {
       work.reset();
     }
   }
+
   void Stop() {
-    for (auto& io_service : this->io_service_) {
-      io_service.stop();
+    for (auto& io_service : this->io_services_) {
+      io_service->stop();
     }
   }
 
  private:
-  std::vector<IoService> io_service_;
+  std::vector<std::unique_ptr<asio::io_service>> io_services_;
   std::vector<WorkPtr> works_;
   std::vector<std::thread> threads_;
   std::atomic_size_t next_io_service_;
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 16 };
+  enum { kMaxBufferSize = 4 };
   char buffer[kMaxBufferSize];
 };
 
@@ -211,6 +221,7 @@ int main(int argc, char* argv[]) {
   unsigned int time_seconds = std::stoi(argv[4]);
 
   try {
+    IoServicePool::Instance().Init();
     asio::io_service io_service;
     std::list<Client> clients;
     for (unsigned int i = 0; i < client_num; ++i) {
@@ -244,5 +255,4 @@ int main(int argc, char* argv[]) {
   std::cout << "Recv msg, pack_num=" << pack_num
             << ", time_passed=" << time_passed << ", pack/sec=" << pack_per_sec
             << std::endl;
-  IoServicePool::Instance().Stop();
 }
