@@ -11,7 +11,6 @@
 #include <cstring>
 #include <deque>
 #include <iostream>
-#include <list>
 #include <memory>
 #include <string>
 #include <thread>
@@ -91,7 +90,7 @@ struct Buffer {
   char buffer[kMaxBufferSize];
 };
 
-class Session : public std::enable_shared_from_this<Session> {
+class Session {
  public:
   Session(asio::io_service& io_service)
       : io_service_(io_service), resolver_(io_service), socket_(io_service) {}
@@ -100,23 +99,20 @@ class Session : public std::enable_shared_from_this<Session> {
   Session& operator=(const Session&) = delete;
   virtual ~Session() {}
 
+  asio::io_service& get_io_service() { return this->io_service_; }
   asio::ip::tcp::socket& get_socket() { return this->socket_; }
 
   void Close() {
-    this->io_service_.post([=]() {
-      this->socket_.shutdown(asio::ip::tcp::socket::shutdown_send);
-      this->socket_.close();
-      this->OnClose();
-    });
+    this->socket_.shutdown(asio::ip::tcp::socket::shutdown_send);
+    this->socket_.close();
+    this->OnClose();
   }
   void Write(const Buffer& msg) {
-    io_service_.post([=]() {
-      bool write_in_progress = !write_bufs_.empty();
-      write_bufs_.push_back(msg);
-      if (!write_in_progress) {
-        DoWrite();
-      }
-    });
+    bool write_in_progress = !write_bufs_.empty();
+    write_bufs_.push_back(msg);
+    if (!write_in_progress) {
+      DoWrite();
+    }
   }
 
   void DoRead() {
@@ -169,7 +165,7 @@ class Session : public std::enable_shared_from_this<Session> {
   std::deque<Buffer> write_bufs_;
 };
 
-class Client {
+class Client : public std::enable_shared_from_this<Client> {
  public:
   Client(asio::io_service& io_service)
       : resolver_(io_service), session_(io_service) {}
@@ -181,9 +177,10 @@ class Client {
   }
 
   void DoConnect(asio::ip::tcp::resolver::iterator endpoint_iterator) {
+    auto self = this->shared_from_this();
     asio::async_connect(
         this->session_.get_socket(), endpoint_iterator,
-        [=](std::error_code ec, asio::ip::tcp::resolver::iterator) {
+        [this, self](std::error_code ec, asio::ip::tcp::resolver::iterator) {
           if (!ec) {
             this->OnConnected();
             this->session_.DoRead();
@@ -201,7 +198,11 @@ class Client {
 
   virtual void ConnError() { std::cerr << "ConnError." << std::endl; }
 
-  void Close() { this->session_.Close(); }
+  void Close() {
+    auto self = this->shared_from_this();
+    this->session_.get_io_service().post(
+        [this, self]() { this->session_.Close(); });
+  }
 
  private:
   asio::ip::tcp::resolver resolver_;
@@ -223,23 +224,17 @@ int main(int argc, char* argv[]) {
   try {
     IoServicePool::Instance().Init();
     asio::io_service io_service;
-    std::list<Client> clients;
+    std::vector<std::shared_ptr<Client>> clients;
     for (unsigned int i = 0; i < client_num; ++i) {
-      clients.emplace_back(IoServicePool::Instance().GetIoService());
-      clients.back().Connect(ip, port);
+      clients.emplace_back(
+          new Client(IoServicePool::Instance().GetIoService()));
+      clients.back()->Connect(ip, port);
     }
     asio::steady_timer timer(io_service);
     std::chrono::seconds time_long{std::stoi(argv[4])};
     timer.expires_from_now(time_long);
-    timer.async_wait([&clients](const asio::error_code&) {
-      /*
-      for (auto& client : clients) {
-        client.Close();
-      }
-      IoServicePool::Instance().ClearWork();
-      */
-      IoServicePool::Instance().Stop();
-    });
+    timer.async_wait(
+        [](const asio::error_code&) { IoServicePool::Instance().Stop(); });
 
     io_service.run();
     IoServicePool::Instance().Join();
