@@ -140,7 +140,7 @@ class Session : public std::enable_shared_from_this<Session> {
               DoWrite();
             }
           } else {
-            SendError();
+            SendError(ec);
           }
         });
   }
@@ -151,7 +151,10 @@ class Session : public std::enable_shared_from_this<Session> {
                 << ", what=" << ec.message() << std::endl;
     }
   }
-  virtual void SendError() { std::cerr << "SendError." << std::endl; }
+  virtual void SendError(std::error_code ec) {
+      std::cerr << "SendError, value=" << ec.value()
+                << ", what=" << ec.message() << std::endl;
+  }
   virtual void OnClose() { std::cout << "OnClose." << std::endl; }
   virtual void OnRead(const Buffer& buf) { this->Write(buf); }
 

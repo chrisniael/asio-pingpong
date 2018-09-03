@@ -139,7 +139,7 @@ class Session {
               DoWrite();
             }
           } else {
-            SendError();
+            SendError(ec);
           }
         });
   }
@@ -150,7 +150,10 @@ class Session {
                 << ", what=" << ec.message() << std::endl;
     }
   }
-  virtual void SendError() {}
+  virtual void SendError(std::error_code ec) {
+    std::cerr << "SendError, value=" << ec.value() << ", what=" << ec.message()
+              << std::endl;
+  }
   virtual void OnClose() {}
   virtual void OnRead(const Buffer& buf) {
     ++pack_num;
