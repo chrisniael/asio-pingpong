@@ -6,7 +6,7 @@
  * @date 2018-08-30
  */
 
-#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -29,12 +29,18 @@ class IoServicePool {
   IoServicePool& operator=(const IoServicePool&) = delete;
 
   void Init(std::size_t pool_size = std::thread::hardware_concurrency()) {
-    for (size_t i = 0; i < pool_size; ++i) {
-      works_.emplace_back(new Work(this->io_service_));
-    }
+    next_io_service_ = 0;
 
     for (size_t i = 0; i < pool_size; ++i) {
-      threads_.emplace_back([this, i]() { io_service_.run(); });
+      io_services_.emplace_back(new asio::io_service);
+    }
+
+    for (size_t i = 0; i < io_services_.size(); ++i) {
+      works_.emplace_back(new Work(*(io_services_[i])));
+    }
+
+    for (size_t i = 0; i < io_services_.size(); ++i) {
+      threads_.emplace_back([this, i]() { io_services_[i]->run(); });
     }
   }
 
@@ -43,7 +49,10 @@ class IoServicePool {
     return instance;
   }
 
-  asio::io_service& GetIoService() { return this->io_service_; }
+  asio::io_service& GetIoService() {
+    auto& service = io_services_[next_io_service_++ % io_services_.size()];
+    return *service.get();
+  }
 
   void Join() {
     for (auto& t : threads_) {
@@ -57,23 +66,28 @@ class IoServicePool {
     }
   }
 
-  void Stop() { io_service_.stop(); }
+  void Stop() {
+    for (auto& io_service : this->io_services_) {
+      io_service->stop();
+    }
+  }
 
  private:
-  asio::io_service io_service_;
+  std::vector<std::unique_ptr<asio::io_service>> io_services_;
   std::vector<WorkPtr> works_;
   std::vector<std::thread> threads_;
+  std::atomic_size_t next_io_service_;
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 16 };
-  std::vector<char> buffer{kMaxBufferSize};
+  enum { kMaxBufferSize = 64 };
+  char buffer[kMaxBufferSize];
 };
 
 class Session : public std::enable_shared_from_this<Session> {
  public:
   Session(asio::io_service& io_service)
-      : io_service_(io_service), strand_(io_service), socket_(io_service) {}
+      : io_service_(io_service), socket_(io_service) {}
 
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
@@ -83,26 +97,52 @@ class Session : public std::enable_shared_from_this<Session> {
 
   void Close() {
     auto self = this->shared_from_this();
-    this->io_service_.post(this->strand_.wrap([this, self]() {
+    this->io_service_.post([this, self]() {
       this->socket_.shutdown(asio::ip::tcp::socket::shutdown_send);
       this->socket_.close();
       this->OnClose();
-    }));
+    });
+  }
+  void Write(const Buffer& buf) {
+    auto self = this->shared_from_this();
+    io_service_.post([this, self, buf]() {
+      bool write_in_progress = !write_bufs_.empty();
+      write_bufs_.push_back(buf);
+      if (!write_in_progress) {
+        DoWrite();
+      }
+    });
   }
 
   void DoRead() {
     auto self = this->shared_from_this();
-    socket_.async_read_some(
-        asio::buffer(read_buf_.buffer, Buffer::kMaxBufferSize),
-        this->strand_.wrap([this, self](const asio::error_code& ec,
-                                        std::size_t bytes_transferred) {
+    asio::async_read(socket_,
+                     asio::buffer(read_buf_.buffer, Buffer::kMaxBufferSize),
+                     [this, self](std::error_code ec, std::size_t /*length*/) {
+                       if (!ec) {
+                         this->OnRead(read_buf_);
+                         DoRead();
+                       } else {
+                         RecvError(ec);
+                       }
+                     });
+  }
+
+  void DoWrite() {
+    auto self = this->shared_from_this();
+    asio::async_write(
+        socket_,
+        asio::buffer(write_bufs_.front().buffer, Buffer::kMaxBufferSize),
+        [this, self](std::error_code ec, std::size_t /*length*/) {
           if (!ec) {
-            this->OnRead(read_buf_, bytes_transferred);
-            // DoRead();
+            write_bufs_.pop_front();
+            if (!write_bufs_.empty()) {
+              DoWrite();
+            }
           } else {
-            RecvError(ec);
+            SendError(ec);
           }
-        }));
+        });
   }
 
   virtual void RecvError(std::error_code ec) {
@@ -116,26 +156,13 @@ class Session : public std::enable_shared_from_this<Session> {
               << std::endl;
   }
   virtual void OnClose() { std::cout << "OnClose." << std::endl; }
-  virtual void OnRead(Buffer& buf, std::size_t bytes) {
-    this->write_bufs_.buffer.swap(buf.buffer);
-    auto self = this->shared_from_this();
-    asio::async_write(socket_, asio::buffer(write_bufs_.buffer, bytes),
-                      this->strand_.wrap([this, self](std::error_code ec,
-                                                      std::size_t /*length*/) {
-                        if (!ec) {
-                          DoRead();
-                        } else {
-                          SendError(ec);
-                        }
-                      }));
-  }
+  virtual void OnRead(const Buffer& buf) { this->Write(buf); }
 
  private:
   asio::io_service& io_service_;
-  asio::io_service::strand strand_;
   asio::ip::tcp::socket socket_;
   Buffer read_buf_;
-  Buffer write_bufs_;
+  std::deque<Buffer> write_bufs_;
 };
 
 class Server {
