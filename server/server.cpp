@@ -174,8 +174,8 @@ class Server {
     addr.from_string(ip);
     asio::ip::tcp::endpoint endpoint(addr, port);
     this->acceptor_.open(asio::ip::tcp::v4());
-    asio::socket_base::reuse_address option(true);
-    this->acceptor_.set_option(option);
+    this->acceptor_.set_option(asio::socket_base::reuse_address(true));
+    this->acceptor_.set_option(asio::ip::tcp::no_delay(true));
     this->acceptor_.bind(endpoint);
     this->acceptor_.listen();
   }
