@@ -105,9 +105,9 @@ class Session : public std::enable_shared_from_this<Session> {
   }
   void Write(const Buffer& buf) {
     auto self = this->shared_from_this();
-    io_service_.post([this, self, buf]() {
+    io_service_.dispatch([this, self, buf]() {
       bool write_in_progress = !write_bufs_.empty();
-      write_bufs_.push_back(buf);
+      write_bufs_.push_back(std::move(buf));
       if (!write_in_progress) {
         DoWrite();
       }
@@ -176,6 +176,7 @@ class Server {
     this->acceptor_.open(asio::ip::tcp::v4());
     this->acceptor_.set_option(asio::socket_base::reuse_address(true));
     this->acceptor_.set_option(asio::ip::tcp::no_delay(true));
+    this->acceptor_.non_blocking(true);
 
     asio::socket_base::send_buffer_size SNDBUF(16);
     asio::socket_base::receive_buffer_size RCVBUF(16);

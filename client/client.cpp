@@ -93,7 +93,7 @@ struct Buffer {
 class Session {
  public:
   Session(asio::io_service& io_service)
-      : io_service_(io_service), resolver_(io_service), socket_(io_service) {}
+      : io_service_(io_service), socket_(io_service) {}
 
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
@@ -162,13 +162,12 @@ class Session {
 
  private:
   asio::io_service& io_service_;
-  asio::ip::tcp::resolver resolver_;
   asio::ip::tcp::socket socket_;
   Buffer read_buf_;
   std::deque<Buffer> write_bufs_;
 };
 
-class Client : public std::enable_shared_from_this<Client> {
+class Client {
  public:
   Client(asio::io_service& io_service)
       : resolver_(io_service), session_(io_service) {}
@@ -180,13 +179,13 @@ class Client : public std::enable_shared_from_this<Client> {
   }
 
   void DoConnect(asio::ip::tcp::resolver::iterator endpoint_iterator) {
-    auto self = this->shared_from_this();
     asio::async_connect(
         this->session_.get_socket(), endpoint_iterator,
-        [this, self](std::error_code ec, asio::ip::tcp::resolver::iterator) {
+        [=](std::error_code ec, asio::ip::tcp::resolver::iterator) {
           if (!ec) {
             this->session_.get_socket().set_option(
                 asio::ip::tcp::no_delay(true));
+            this->session_.get_socket().non_blocking(true);
             asio::socket_base::send_buffer_size SNDBUF(16);
             asio::socket_base::receive_buffer_size RCVBUF(16);
             this->session_.get_socket().set_option(SNDBUF);
@@ -209,9 +208,8 @@ class Client : public std::enable_shared_from_this<Client> {
   virtual void ConnError() { std::cerr << "ConnError." << std::endl; }
 
   void Close() {
-    auto self = this->shared_from_this();
     this->session_.get_io_service().post(
-        [this, self]() { this->session_.Close(); });
+        [=]() { this->session_.Close(); });
   }
 
  private:
