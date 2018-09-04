@@ -185,6 +185,13 @@ class Client : public std::enable_shared_from_this<Client> {
         this->session_.get_socket(), endpoint_iterator,
         [this, self](std::error_code ec, asio::ip::tcp::resolver::iterator) {
           if (!ec) {
+            this->session_.get_socket().set_option(
+                asio::ip::tcp::no_delay(true));
+            asio::socket_base::send_buffer_size SNDBUF(16);
+            asio::socket_base::receive_buffer_size RCVBUF(16);
+            this->session_.get_socket().set_option(SNDBUF);
+            this->session_.get_socket().set_option(RCVBUF);
+
             this->OnConnected();
             this->session_.DoRead();
           } else {
