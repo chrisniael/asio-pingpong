@@ -86,7 +86,7 @@ class IoServicePool {
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 64 };
+  enum { kMaxBufferSize = 16 };
   char buffer[kMaxBufferSize];
 };
 
