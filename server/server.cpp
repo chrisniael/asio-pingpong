@@ -169,9 +169,7 @@ class Server {
   Server(asio::io_service& io_service, const std::string& ip,
          const unsigned short& port)
       : acceptor_(io_service) {
-    asio::ip::address addr;
-    addr.from_string(ip);
-    asio::ip::tcp::endpoint endpoint(addr, port);
+    asio::ip::tcp::endpoint endpoint(asio::ip::address::from_string(ip), port);
     this->acceptor_.open(asio::ip::tcp::v4());
     this->acceptor_.set_option(asio::socket_base::reuse_address(true));
     this->acceptor_.set_option(asio::ip::tcp::no_delay(true));
