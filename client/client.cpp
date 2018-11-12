@@ -103,7 +103,6 @@ class Session {
   asio::ip::tcp::socket& get_socket() { return this->socket_; }
 
   void Close() {
-    this->socket_.shutdown(asio::ip::tcp::socket::shutdown_send);
     this->socket_.close();
     this->OnClose();
   }

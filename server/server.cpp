@@ -98,7 +98,6 @@ class Session : public std::enable_shared_from_this<Session> {
   void Close() {
     auto self = this->shared_from_this();
     this->io_service_.post([this, self]() {
-      this->socket_.shutdown(asio::ip::tcp::socket::shutdown_send);
       this->socket_.close();
       this->OnClose();
     });
