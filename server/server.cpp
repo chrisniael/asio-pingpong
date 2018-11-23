@@ -80,7 +80,7 @@ class IoServicePool {
 };
 
 struct Buffer {
-  enum { kMaxBufferSize = 16 };
+  enum { kMaxBufferSize = 1 };
   char buffer[kMaxBufferSize];
 };
 
@@ -175,10 +175,10 @@ class Server {
     this->acceptor_.set_option(asio::ip::tcp::no_delay(true));
     this->acceptor_.non_blocking(true);
 
-    asio::socket_base::send_buffer_size SNDBUF(16);
-    asio::socket_base::receive_buffer_size RCVBUF(16);
-    this->acceptor_.set_option(SNDBUF);
-    this->acceptor_.set_option(RCVBUF);
+    // asio::socket_base::send_buffer_size SNDBUF(16);
+    // asio::socket_base::receive_buffer_size RCVBUF(16);
+    // this->acceptor_.set_option(SNDBUF);
+    // this->acceptor_.set_option(RCVBUF);
 
     this->acceptor_.bind(endpoint);
     this->acceptor_.listen();
