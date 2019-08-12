@@ -144,7 +144,7 @@ class Session {
   }
 
   virtual void RecvError(std::error_code ec) {
-    if (ec != asio::error::eof && ec != asio::error::connection_reset) {
+    if (ec != asio::error::connection_reset) {
       std::cerr << "RecvError, value=" << ec.value()
                 << ", what=" << ec.message() << std::endl;
     }
