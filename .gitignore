@@ -10,3 +10,6 @@ bin
 lib
 compile_commands.json
 tags
+.cache
+cmake-build-*
+.idea
