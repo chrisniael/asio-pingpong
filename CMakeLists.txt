@@ -14,7 +14,7 @@ add_definitions(-DASIO_STANDALONE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # 设置编译器参数
-add_compile_options(-g)
+add_compile_options(-g -std=c++11)
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
